@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chuyển Văn Bản Dài Thành Giọng Nói (5000 ký tự)</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #eef2f5;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+        }
+
+        .container {
+            background-color: white;
+            padding: 2.5rem;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.08);
+            width: 90%;
+            max-width: 700px;
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+        }
+
+        .input-wrapper {
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        textarea {
+            width: 100%;
+            height: 250px; /* Tăng chiều cao để chứa nhiều chữ */
+            padding: 15px;
+            padding-bottom: 30px; /* Chừa chỗ cho bộ đếm */
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            line-height: 1.5;
+            resize: vertical;
+            box-sizing: border-box; 
+            font-family: inherit;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #3498db;
+        }
+
+        #char-count {
+            position: absolute;
+            bottom: 10px;
+            right: 15px;
+            font-size: 12px;
+            color: #888;
+            font-weight: bold;
+        }
+
+        .limit-reached {
+            color: #e74c3c !important;
+        }
+
+        .controls {
+            display: grid;
+            gap: 20px;
+            margin-bottom: 2rem;
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 10px;
+        }
+
+        label {
+            font-weight: 600;
+            font-size: 14px;
+            color: #555;
+            margin-bottom: 5px;
+            display: block;
+        }
+
+        select, input[type="range"] {
+            width: 100%;
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 15px;
+        }
+
+        button {
+            flex: 1;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+        }
+
+        .btn-speak {
+            background-color: #3498db;
+            color: white;
+        }
+        .btn-speak:hover { background-color: #2980b9; }
+
+        .btn-pause {
+            background-color: #f1c40f;
+            color: #333;
+        }
+        .btn-pause:hover { background-color: #f39c12; }
+
+        .btn-stop {
+            background-color: #e74c3c;
+            color: white;
+        }
+        .btn-stop:hover { background-color: #c0392b; }
+
+        /* Trạng thái đang đọc */
+        .speaking textarea {
+            background-color: #fcfcfc;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Đọc Văn Bản Dài (Max 5000 ký tự)</h1>
+    
+    <div class="input-wrapper">
+        <textarea id="text-input" maxlength="5000" placeholder="Dán văn bản dài của bạn vào đây (tối đa 5000 ký tự)..."></textarea>
+        <div id="char-count">0 / 5000</div>
+    </div>
+
+    <div class="controls">
+        <div>
+            <label for="voice-select">Giọng đọc:</label>
+            <select id="voice-select"></select>
+        </div>
+
+        <div style="display: flex; gap: 20px;">
+            <div style="flex: 1;">
+                <label for="rate">Tốc độ (0.5 - 2.0):</label>
+                <input type="range" id="rate" min="0.5" max="2" value="1" step="0.1">
+            </div>
+            <div style="flex: 1;">
+                <label for="pitch">Độ cao (0 - 2):</label>
+                <input type="range" id="pitch" min="0" max="2" value="1" step="0.1">
+            </div>
+        </div>
+    </div>
+
+    <div class="buttons">
+        <button id="speak-btn" class="btn-speak">▶ Đọc</button>
+        <button id="pause-btn" class="btn-pause">II Tạm dừng</button>
+        <button id="stop-btn" class="btn-stop">■ Hủy bỏ</button>
+    </div>
+</div>
+
+<script>
+    const synth = window.speechSynthesis;
+    const textInput = document.getElementById('text-input');
+    const voiceSelect = document.getElementById('voice-select');
+    const pitchInput = document.getElementById('pitch');
+    const rateInput = document.getElementById('rate');
+    const speakBtn = document.getElementById('speak-btn');
+    const pauseBtn = document.getElementById('pause-btn');
+    const stopBtn = document.getElementById('stop-btn');
+    const charCount = document.getElementById('char-count');
+
+    let voices = [];
+    let isPaused = false;
+
+    // 1. Cập nhật bộ đếm ký tự
+    textInput.addEventListener('input', () => {
+        const currentLength = textInput.value.length;
+        charCount.textContent = `${currentLength} / 5000`;
+        if (currentLength >= 5000) {
+            charCount.classList.add('limit-reached');
+        } else {
+            charCount.classList.remove('limit-reached');
+        }
+    });
+
+    // 2. Lấy danh sách giọng đọc
+    function populateVoices() {
+        voices = synth.getVoices();
+        voiceSelect.innerHTML = '';
+        voices.forEach((voice) => {
+            const option = document.createElement('option');
+            option.textContent = `${voice.name} (${voice.lang})`;
+            option.setAttribute('data-name', voice.name);
+            voiceSelect.appendChild(option);
+        });
+        
+        // Ưu tiên tiếng Việt
+        const vnVoiceIndex = voices.findIndex(voice => voice.lang.includes('vi'));
+        if (vnVoiceIndex !== -1) voiceSelect.selectedIndex = vnVoiceIndex;
+    }
+
+    populateVoices();
+    if (speechSynthesis.onvoiceschanged !== undefined) {
+        speechSynthesis.onvoiceschanged = populateVoices;
+    }
+
+    // 3. Hàm chia nhỏ văn bản (QUAN TRỌNG NHẤT)
+    // Tách văn bản thành các câu dựa trên dấu chấm câu để tránh lỗi browser
+    function splitText(text) {
+        // Regex này tách câu dựa trên . ! ? hoặc xuống dòng, nhưng vẫn giữ lại dấu câu
+        return text.match(/[^.!?\n]+[.!?\n]*/g) || [];
+    }
+
+    // 4. Hàm xử lý đọc
+    function speak() {
+        if (synth.speaking && isPaused) {
+            synth.resume();
+            isPaused = false;
+            speakBtn.textContent = "▶ Đang đọc...";
+            pauseBtn.textContent = "II Tạm dừng";
+            return;
+        }
+
+        if (synth.speaking) {
+            // Nếu đang đọc cái khác thì hủy cái cũ đi đọc cái mới
+            synth.cancel(); 
+        }
+
+        if (textInput.value !== '') {
+            document.body.classList.add('speaking');
+            speakBtn.textContent = "▶ Đang đọc...";
+            
+            // Lấy giọng đã chọn
+            const selectedVoiceName = voiceSelect.selectedOptions[0].getAttribute('data-name');
+            const selectedVoice = voices.find(v => v.name === selectedVoiceName);
+
+            // Tách văn bản dài thành các đoạn nhỏ (chunks)
+            const textChunks = splitText(textInput.value);
+
+            // Duyệt qua từng đoạn và đưa vào hàng đợi đọc
+            textChunks.forEach((chunk, index) => {
+                // Bỏ qua các đoạn chỉ có khoảng trắng
+                if (chunk.trim().length === 0) return;
+
+                const utterance = new SpeechSynthesisUtterance(chunk);
+                
+                utterance.voice = selectedVoice;
+                utterance.rate = rateInput.value;
+                utterance.pitch = pitchInput.value;
+
+                // Xử lý khi đọc xong câu cuối cùng
+                if (index === textChunks.length - 1) {
+                    utterance.onend = () => {
+                        document.body.classList.remove('speaking');
+                        speakBtn.textContent = "▶ Đọc lại";
+                        isPaused = false;
+                    };
+                }
+
+                // Xử lý lỗi
+                utterance.onerror = (e) => {
+                    console.error('Lỗi đọc:', e);
+                    document.body.classList.remove('speaking');
+                };
+
+                synth.speak(utterance);
+            });
+        }
+    }
+
+    // 5. Gán sự kiện nút bấm
+    speakBtn.addEventListener('click', () => speak());
+
+    pauseBtn.addEventListener('click', () => {
+        if (synth.speaking && !isPaused) {
+            synth.pause();
+            isPaused = true;
+            pauseBtn.textContent = "▶ Tiếp tục";
+            speakBtn.textContent = "▶ Đang tạm dừng";
+        } else if (isPaused) {
+            synth.resume();
+            isPaused = false;
+            pauseBtn.textContent = "II Tạm dừng";
+            speakBtn.textContent = "▶ Đang đọc...";
+        }
+    });
+
+    stopBtn.addEventListener('click', () => {
+        synth.cancel();
+        isPaused = false;
+        document.body.classList.remove('speaking');
+        speakBtn.textContent = "▶ Đọc";
+        pauseBtn.textContent = "II Tạm dừng";
+    });
+
+    // Fix lỗi: Khi đóng tab hoặc tải lại trang thì dừng đọc
+    window.onbeforeunload = () => {
+        synth.cancel();
+    };
+
+</script>
+
+</body>
+</html>
